@@ -11,6 +11,7 @@
 import random
 from math import floor, ceil
 from collections import Counter
+import time
 
 board_side_len = 8
 ch_size = (board_side_len**2)
@@ -18,7 +19,7 @@ ch_bit_size = ch_size * 3
 pop_size = 60
 move_list = [(-2, -1), (-2, 1), (2, -1), (2, 1), (-1, -2), (-1, 2), (1, -2), (1, 2)]
 octal_move_list = ['000', '001', '010', '011', '100', '101', '110', '111']
-octal_move_dict = {'000': (-2, -1), '001': (-2, 1), '010': (2, -1), '011': (2, 1), '100': (-1, -2), '101': (-1, 2), '110': (1, -2), '111': (1, 2)}
+octal_move_dict = {'000': (-2, -1), '001': (-2, 1), '010': (-1, 2), '011': (1, 2), '100': (2, 1), '101': (2, -1), '110': (1, -2), '111': (-1, -2) }
 to_octal = {'000': '0', '001': '1', '010': '2', '011': '3', '100': '4', '101': '5', '110': '6', '111': '7'}
 initial_square = (4, 4)
 crossover_rate = .8
@@ -61,10 +62,13 @@ def gen_chromosome():
 def generate_population():
     return [gen_chromosome() for _ in range(pop_size)]
 
-def population_summary(pop):
+def population_summary(pop, bin=False):
     pop = sorted(pop, key=lambda s: eval_fitness(s), reverse=True)
     for chromosome in pop:
-        print(eval_fitness(chromosome), convert_to_octal(chromosome))
+        if(bin):
+            print(eval_fitness(chromosome), chromosome)
+        else:
+            print(eval_fitness(chromosome), convert_to_octal(chromosome))
 
 def convert_to_octal(chromosome):
     genes = map(''.join, zip(*[iter(chromosome)]*3))
@@ -120,12 +124,17 @@ def repair(chromosome):
             board[knight.x][knight.y] = 1
         else:
             moves = random.sample(octal_move_list, 8)
+            repaired = False
             for move in moves:
                 if(knight.can_move(board, octal_move_dict[move])):
                     knight.move(octal_move_dict[move])
                     board[knight.x][knight.y] = 1
                     genes[index] = move
+                    repaired = True
                     break
+
+            if(not repaired):
+                break
 
     return ''.join(genes)
 
@@ -137,13 +146,13 @@ def crossover(chromo_a, chromo_b):
     return child_a, child_b
 
 def mutate(chromosome):
-    genes = [char for char in chromosome]
-    for i in range(len(genes)):
-        x = random.randint(1,100)
-        if(x <= 1):
-            genes[i] = alphabet.replace(genes[i], '')
+    bits = [char for char in chromosome]
+    for i in range(len(bits)):
+        x = random.random()
+        if(x <= mutation_rate):
+            bits[i] = alphabet.replace(bits[i], '')
 
-    return ''.join(genes)
+    return ''.join(bits)
 
 
 def select_top(pop):
@@ -156,7 +165,7 @@ def epoch(pop):
     sel_1 = selection[:slice_point]
     sel_2 = selection[slice_point:]
 
-    for index, _ in enumerate(sel_1):
+    for index in range(len(sel_1)):
         child_a, child_b = crossover(sel_1[index], sel_2[index])
         new_gen.append(repair(mutate(child_a)))
         new_gen.append(repair(mutate(child_b)))
@@ -168,28 +177,37 @@ def progress_bar(i, total):
     p = floor((i*50)/total)
     print('\r[' + ('='*p) + (' '*(50-p)) + '] ' + 'Generations: ' + str(i) + '/' + str(total), end='')
 
-def summary(best, first_tour_gen):
+def summary(best, first_tour_gen, tour_counter, time):
     print("Population size: " + str(pop_size))
     print("Crossover rate: " + str(crossover_rate) + "\tMutation rate: " + str(mutation_rate))
     print("Total number of generations: " + str(gen_size))
     print("First tour at generation " + str(first_tour_gen))
+    print("Total number of tours found: " + str(tour_counter))
     print("Best solution (octal): " + convert_to_octal(best) + "\tFitness score: " + str(eval_fitness(best)))
+    print('Time: %s seconds' % time)
 
 if(__name__ == "__main__"):
 
+    start_time = time.time()
     pop = generate_population()
     pop = [repair(sub) for sub in pop]
 
     first_tour_gen = None
+    tour_counter = 0
     for i in range(gen_size):
         progress_bar(i, gen_size)
         pop = epoch(pop)
         pop = sorted(pop, key=lambda s: eval_fitness(s), reverse=True)
-        if(eval_fitness(pop[0]) >= 63 and first_tour_gen is None):
-            first_tour_gen = i + 1
+        if(eval_fitness(pop[0]) >= 63):
+            if(first_tour_gen is None):
+                first_tour_gen = i + 1
+            tour_counter += 1
 
     print()
 
     pop = [repair(sub) for sub in pop]
-    summary(pop[0], first_tour_gen)
+    summary(pop[0], first_tour_gen, tour_counter, (time.time() - start_time))
+    print()
     eval_fitness(pop[0], True)
+
+    # population_summary(pop, True)
