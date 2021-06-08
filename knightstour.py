@@ -18,7 +18,7 @@ import time
 import os
 import uuid
 
-image_dir = "__graphs"
+image_dir = "___graphs"
 if not os.path.exists(image_dir):
     os.mkdir(image_dir)
 
@@ -36,17 +36,21 @@ if not os.path.exists(pop_2_dir):
 
 board_side_len = 8
 ch_size = (board_side_len**2)
+ch_size_with_params = ch_size + 2
 ch_bit_size = ch_size * 3
-default_pop_size = 60
+default_pop_size = 100
 move_list = [(-2, -1), (-2, 1), (2, -1), (2, 1), (-1, -2), (-1, 2), (1, -2), (1, 2)]
 octal_move_list = ['000', '001', '010', '011', '100', '101', '110', '111']
 octal_move_dict = {'000': (-2, -1), '001': (-2, 1), '010': (-1, 2), '011': (1, 2), '100': (2, 1), '101': (2, -1), '110': (1, -2), '111': (-1, -2) }
 to_octal = {'000': '0', '001': '1', '010': '2', '011': '3', '100': '4', '101': '5', '110': '6', '111': '7'}
+to_crossover_rate = {'000': .1, '001': .2, '010': .3, '011': .4, '100': .5, '101': .6, '110': .7, '111': .8}
+to_mutation_rate = {'000': .01, '001': .011, '010': .012, '011': .013, '100': .014, '101': .015, '110': .016, '111': .017}
 initial_square = (4, 4)
 default_crossover_rate = .8
 default_mutation_rate = .01
 alphabet = "01"
-default_gen_size = 1000
+default_gen_size = 500
+def_iterations = 30
 
 class Knight:
     def __init__(self, xpos, ypos):
@@ -77,11 +81,15 @@ def print_board(board):
     for line in board:
         print(line)
 
-def gen_chromosome():
-    return ''.join(random.choice(octal_move_list) for _ in range(ch_size))
+def gen_chromosome(encoded=False):
+    size = ch_size
+    if(encoded):
+        size = ch_size_with_params
 
-def generate_population(pop_size=default_pop_size):
-    return [gen_chromosome() for _ in range(pop_size)]
+    return ''.join(random.choice(octal_move_list) for _ in range(size))
+
+def generate_population(pop_size=default_pop_size, encoded=False):
+    return [gen_chromosome(encoded) for _ in range(pop_size)]
 
 def population_summary(pop, bin=False):
     pop = sorted(pop, key=lambda s: eval_fitness(s), reverse=True)
@@ -113,7 +121,10 @@ def get_board(chromosome):
 
     return board
 
-def eval_fitness(chromosome, verb=False):
+def eval_fitness(chromosome, encoded=False):
+    if(encoded):
+        chromosome = chromosome[3:-3]
+
     board = empty_board()
     x, y = initial_square
     knight = Knight(x, y)
@@ -125,15 +136,18 @@ def eval_fitness(chromosome, verb=False):
             knight.move(octal_move_dict[gene])
             board[knight.x][knight.y] = 1
 
-    if(verb):
-        print_board(board)
-
     total = 0
     for line in board:
         total += sum(line)
+
     return total
 
-def repair(chromosome):
+def repair(chromosome, encoded=False):
+    if(encoded):
+        cross_rate = chromosome[:3]
+        mut_rate = chromosome[-3:]
+        chromosome = chromosome[3:-3]
+
     board = empty_board()
     x, y = initial_square
     knight = Knight(x, y)
@@ -157,17 +171,34 @@ def repair(chromosome):
             if(not repaired):
                 break
 
-    return ''.join(genes)
+    result = ''.join(genes)
+    if(encoded):
+        result = cross_rate + result + mut_rate
+    return result
 
-def crossover(chromo_a, chromo_b, crossover_rate=default_crossover_rate):
-    cut_p = floor(ch_bit_size * crossover_rate)
+def crossover(chromo_a, chromo_b, crossover_rate=default_crossover_rate, encoded=False):
+    bit_size = len(chromo_a)
+    if(encoded):
+        fit_a = eval_fitness(chromo_a, encoded)
+        fit_b = eval_fitness(chromo_b, encoded)
+
+        if fit_a >= fit_b:
+            crossover_rate = to_crossover_rate[chromo_a[:3]]
+        else:
+            crossover_rate = to_crossover_rate[chromo_b[:3]]
+
+    cut_p = floor(bit_size * crossover_rate)
     child_a = chromo_a[:cut_p] + chromo_b[cut_p:]
     child_b = chromo_b[:cut_p] + chromo_a[cut_p:]
 
     return child_a, child_b
 
-def mutate(chromosome, mutation_rate = default_mutation_rate):
+def mutate(chromosome, mutation_rate = default_mutation_rate, encoded=False):
     bits = [char for char in chromosome]
+
+    if(encoded):
+        mutation_rate = to_mutation_rate[chromosome[-3:]]
+
     for i in range(len(bits)):
         x = random.random()
         if(x <= mutation_rate):
@@ -176,21 +207,23 @@ def mutate(chromosome, mutation_rate = default_mutation_rate):
     return ''.join(bits)
 
 
-def select_top(pop):
-    sorted_pop = sorted(pop, key=lambda s: eval_fitness(s), reverse=True)
-    # return sorted_pop[:floor(default_pop_size/2)]
+def select_top(pop, encoded=False):
+    sorted_pop = sorted(pop, key=lambda s: eval_fitness(s, encoded), reverse=True)
+
     return sorted_pop[:floor(len(pop)/2)]
 
-def epoch(pop, crossover_rate=default_crossover_rate, mutation_rate=default_mutation_rate):
-    new_gen = selection = select_top(pop)
+def epoch(pop, crossover_rate=default_crossover_rate, mutation_rate=default_mutation_rate, encoded=False):
+    new_gen = selection = select_top(pop, encoded)
+
     slice_point = floor(len(selection)/2)
     sel_1 = selection[:slice_point]
     sel_2 = selection[slice_point:]
 
     for index in range(len(sel_1)):
-        child_a, child_b = crossover(sel_1[index], sel_2[index], crossover_rate)
-        new_gen.append(repair(mutate(child_a, mutation_rate)))
-        new_gen.append(repair(mutate(child_b, mutation_rate)))
+        child_a, child_b = crossover(sel_1[index], sel_2[index], crossover_rate, encoded)
+        new_gen.append(repair(mutate(child_a, mutation_rate, encoded), encoded))
+        new_gen.append(repair(mutate(child_b, mutation_rate, encoded), encoded))
+
 
     return new_gen
 
@@ -209,22 +242,21 @@ def summary(best, first_tour_gen, tour_counter, time):
     print("Best solution (octal): " + convert_to_octal(best) + "\tFitness score: " + str(eval_fitness(best)))
     print('Time: %s seconds' % time)
 
-def average_fitness(pop):
-    fitness_list = [eval_fitness(x) for x in pop]
+def average_fitness(pop, encoded=False):
+    fitness_list = [eval_fitness(x, encoded) for x in pop]
     return statistics.mean(fitness_list)
 
-def do_stuff(pop, gen_size=default_gen_size, image_name="fig", show=False, crossover_rate=default_crossover_rate, mutation_rate=default_mutation_rate):
-
+def run(pop, gen_size=default_gen_size, image_name="fig", show=False, crossover_rate=default_crossover_rate, mutation_rate=default_mutation_rate, encoded=False):
     first_tour_gen = None
     tour_counter = 0
     av_fits = []
     for i in range(gen_size):
         progress_bar(i, gen_size)
-        pop = epoch(pop, crossover_rate, mutation_rate)
-        average_fit = average_fitness(pop)
+        pop = epoch(pop, crossover_rate, mutation_rate, encoded)
+        average_fit = average_fitness(pop, encoded)
         av_fits.append(average_fit)
         pop = sorted(pop, key=lambda s: eval_fitness(s), reverse=True)
-        if(eval_fitness(pop[0]) >= 63):
+        if(eval_fitness(pop[0], encoded) >= 63):
             if(first_tour_gen is None):
                 first_tour_gen = i + 1
             tour_counter += 1
@@ -244,78 +276,59 @@ def do_stuff(pop, gen_size=default_gen_size, image_name="fig", show=False, cross
 
     print()
 
-if(__name__ == "__main__"):
-
-    start_time = time.time()
-
-    pop_0 = generate_population()
+def manual():
+    pop_0 = generate_population(60)
     pop_0 = [repair(sub) for sub in pop_0]
 
-    pop_1 = generate_population()
+    pop_1 = generate_population(80)
     pop_1 = [repair(sub) for sub in pop_1]
 
-    pop_2 = generate_population()
+    pop_2 = generate_population(100)
     pop_2 = [repair(sub) for sub in pop_2]
 
     cross_rates = [0.8, 0.7, 0.5]
     mut_rates = [0.01, 0.001, 0.005]
 
-    for i in range(5):
+    for i in range(def_iterations):
         print("Iteration {}/30".format(i+1))
-        do_stuff(pop_0, crossover_rate=cross_rates[0], mutation_rate=mut_rates[0], image_name="{}/00_{}".format(pop_0_dir, uuid.uuid1()))
-        do_stuff(pop_0, crossover_rate=cross_rates[0], mutation_rate=mut_rates[1], image_name="{}/01_{}".format(pop_0_dir, uuid.uuid1()))
-        do_stuff(pop_0, crossover_rate=cross_rates[0], mutation_rate=mut_rates[2], image_name="{}/02_{}".format(pop_0_dir, uuid.uuid1()))
-        do_stuff(pop_0, crossover_rate=cross_rates[1], mutation_rate=mut_rates[0], image_name="{}/10_{}".format(pop_0_dir, uuid.uuid1()))
-        do_stuff(pop_0, crossover_rate=cross_rates[1], mutation_rate=mut_rates[1], image_name="{}/11_{}".format(pop_0_dir, uuid.uuid1()))
-        do_stuff(pop_0, crossover_rate=cross_rates[1], mutation_rate=mut_rates[2], image_name="{}/12_{}".format(pop_0_dir, uuid.uuid1()))
-        do_stuff(pop_0, crossover_rate=cross_rates[2], mutation_rate=mut_rates[0], image_name="{}/20_{}".format(pop_0_dir, uuid.uuid1()))
-        do_stuff(pop_0, crossover_rate=cross_rates[2], mutation_rate=mut_rates[1], image_name="{}/21_{}".format(pop_0_dir, uuid.uuid1()))
-        do_stuff(pop_0, crossover_rate=cross_rates[2], mutation_rate=mut_rates[2], image_name="{}/22_{}".format(pop_0_dir, uuid.uuid1()))
+        run(pop_0, crossover_rate=cross_rates[0], mutation_rate=mut_rates[0], image_name="{}/00_{}".format(pop_0_dir, uuid.uuid1()))
+        run(pop_0, crossover_rate=cross_rates[0], mutation_rate=mut_rates[1], image_name="{}/01_{}".format(pop_0_dir, uuid.uuid1()))
+        run(pop_0, crossover_rate=cross_rates[0], mutation_rate=mut_rates[2], image_name="{}/02_{}".format(pop_0_dir, uuid.uuid1()))
+        run(pop_0, crossover_rate=cross_rates[1], mutation_rate=mut_rates[0], image_name="{}/10_{}".format(pop_0_dir, uuid.uuid1()))
+        run(pop_0, crossover_rate=cross_rates[1], mutation_rate=mut_rates[1], image_name="{}/11_{}".format(pop_0_dir, uuid.uuid1()))
+        run(pop_0, crossover_rate=cross_rates[1], mutation_rate=mut_rates[2], image_name="{}/12_{}".format(pop_0_dir, uuid.uuid1()))
+        run(pop_0, crossover_rate=cross_rates[2], mutation_rate=mut_rates[0], image_name="{}/20_{}".format(pop_0_dir, uuid.uuid1()))
+        run(pop_0, crossover_rate=cross_rates[2], mutation_rate=mut_rates[1], image_name="{}/21_{}".format(pop_0_dir, uuid.uuid1()))
+        run(pop_0, crossover_rate=cross_rates[2], mutation_rate=mut_rates[2], image_name="{}/22_{}".format(pop_0_dir, uuid.uuid1()))
 
-        do_stuff(pop_1, crossover_rate=cross_rates[0], mutation_rate=mut_rates[0], image_name="{}/00_{}".format(pop_1_dir, uuid.uuid1()))
-        do_stuff(pop_1, crossover_rate=cross_rates[0], mutation_rate=mut_rates[1], image_name="{}/01_{}".format(pop_1_dir, uuid.uuid1()))
-        do_stuff(pop_1, crossover_rate=cross_rates[0], mutation_rate=mut_rates[2], image_name="{}/02_{}".format(pop_1_dir, uuid.uuid1()))
-        do_stuff(pop_1, crossover_rate=cross_rates[1], mutation_rate=mut_rates[0], image_name="{}/10_{}".format(pop_1_dir, uuid.uuid1()))
-        do_stuff(pop_1, crossover_rate=cross_rates[1], mutation_rate=mut_rates[1], image_name="{}/11_{}".format(pop_1_dir, uuid.uuid1()))
-        do_stuff(pop_1, crossover_rate=cross_rates[1], mutation_rate=mut_rates[2], image_name="{}/12_{}".format(pop_1_dir, uuid.uuid1()))
-        do_stuff(pop_1, crossover_rate=cross_rates[2], mutation_rate=mut_rates[0], image_name="{}/20_{}".format(pop_1_dir, uuid.uuid1()))
-        do_stuff(pop_1, crossover_rate=cross_rates[2], mutation_rate=mut_rates[1], image_name="{}/21_{}".format(pop_1_dir, uuid.uuid1()))
-        do_stuff(pop_1, crossover_rate=cross_rates[2], mutation_rate=mut_rates[2], image_name="{}/22_{}".format(pop_1_dir, uuid.uuid1()))
+        run(pop_1, crossover_rate=cross_rates[0], mutation_rate=mut_rates[0], image_name="{}/00_{}".format(pop_1_dir, uuid.uuid1()))
+        run(pop_1, crossover_rate=cross_rates[0], mutation_rate=mut_rates[1], image_name="{}/01_{}".format(pop_1_dir, uuid.uuid1()))
+        run(pop_1, crossover_rate=cross_rates[0], mutation_rate=mut_rates[2], image_name="{}/02_{}".format(pop_1_dir, uuid.uuid1()))
+        run(pop_1, crossover_rate=cross_rates[1], mutation_rate=mut_rates[0], image_name="{}/10_{}".format(pop_1_dir, uuid.uuid1()))
+        run(pop_1, crossover_rate=cross_rates[1], mutation_rate=mut_rates[1], image_name="{}/11_{}".format(pop_1_dir, uuid.uuid1()))
+        run(pop_1, crossover_rate=cross_rates[1], mutation_rate=mut_rates[2], image_name="{}/12_{}".format(pop_1_dir, uuid.uuid1()))
+        run(pop_1, crossover_rate=cross_rates[2], mutation_rate=mut_rates[0], image_name="{}/20_{}".format(pop_1_dir, uuid.uuid1()))
+        run(pop_1, crossover_rate=cross_rates[2], mutation_rate=mut_rates[1], image_name="{}/21_{}".format(pop_1_dir, uuid.uuid1()))
+        run(pop_1, crossover_rate=cross_rates[2], mutation_rate=mut_rates[2], image_name="{}/22_{}".format(pop_1_dir, uuid.uuid1()))
 
-        do_stuff(pop_2, crossover_rate=cross_rates[0], mutation_rate=mut_rates[0], image_name="{}/00_{}".format(pop_2_dir, uuid.uuid1()))
-        do_stuff(pop_2, crossover_rate=cross_rates[0], mutation_rate=mut_rates[1], image_name="{}/01_{}".format(pop_2_dir, uuid.uuid1()))
-        do_stuff(pop_2, crossover_rate=cross_rates[0], mutation_rate=mut_rates[2], image_name="{}/02_{}".format(pop_2_dir, uuid.uuid1()))
-        do_stuff(pop_2, crossover_rate=cross_rates[1], mutation_rate=mut_rates[0], image_name="{}/10_{}".format(pop_2_dir, uuid.uuid1()))
-        do_stuff(pop_2, crossover_rate=cross_rates[1], mutation_rate=mut_rates[1], image_name="{}/11_{}".format(pop_2_dir, uuid.uuid1()))
-        do_stuff(pop_2, crossover_rate=cross_rates[1], mutation_rate=mut_rates[2], image_name="{}/12_{}".format(pop_2_dir, uuid.uuid1()))
-        do_stuff(pop_2, crossover_rate=cross_rates[2], mutation_rate=mut_rates[0], image_name="{}/20_{}".format(pop_2_dir, uuid.uuid1()))
-        do_stuff(pop_2, crossover_rate=cross_rates[2], mutation_rate=mut_rates[1], image_name="{}/21_{}".format(pop_2_dir, uuid.uuid1()))
-        do_stuff(pop_2, crossover_rate=cross_rates[2], mutation_rate=mut_rates[2], image_name="{}/22_{}".format(pop_2_dir, uuid.uuid1()))
+        run(pop_2, crossover_rate=cross_rates[0], mutation_rate=mut_rates[0], image_name="{}/00_{}".format(pop_2_dir, uuid.uuid1()))
+        run(pop_2, crossover_rate=cross_rates[0], mutation_rate=mut_rates[1], image_name="{}/01_{}".format(pop_2_dir, uuid.uuid1()))
+        run(pop_2, crossover_rate=cross_rates[0], mutation_rate=mut_rates[2], image_name="{}/02_{}".format(pop_2_dir, uuid.uuid1()))
+        run(pop_2, crossover_rate=cross_rates[1], mutation_rate=mut_rates[0], image_name="{}/10_{}".format(pop_2_dir, uuid.uuid1()))
+        run(pop_2, crossover_rate=cross_rates[1], mutation_rate=mut_rates[1], image_name="{}/11_{}".format(pop_2_dir, uuid.uuid1()))
+        run(pop_2, crossover_rate=cross_rates[1], mutation_rate=mut_rates[2], image_name="{}/12_{}".format(pop_2_dir, uuid.uuid1()))
+        run(pop_2, crossover_rate=cross_rates[2], mutation_rate=mut_rates[0], image_name="{}/20_{}".format(pop_2_dir, uuid.uuid1()))
+        run(pop_2, crossover_rate=cross_rates[2], mutation_rate=mut_rates[1], image_name="{}/21_{}".format(pop_2_dir, uuid.uuid1()))
+        run(pop_2, crossover_rate=cross_rates[2], mutation_rate=mut_rates[2], image_name="{}/22_{}".format(pop_2_dir, uuid.uuid1()))
 
+def stochastic():
+    pop = generate_population(encoded=True)
+    for i in range(def_iterations):
+        run(pop, image_name="{}/STCH_{}".format(image_dir, uuid.uuid1()), encoded=True)
+
+if(__name__ == "__main__"):
+
+    start_time = time.time()
+    # manual()
+    stochastic()
     print("time: {}".format((time.time() - start_time)))
-    # first_tour_gen = None
-    # tour_counter = 0
-    # av_fits = []
-    # for i in range(default_gen_size):
-    #     progress_bar(i, default_gen_size)
-    #     pop = epoch(pop)
-    #     average_fit = average_fitness(pop)
-    #     av_fits.append(average_fit)
-    #     pop = sorted(pop, key=lambda s: eval_fitness(s), reverse=True)
-    #     if(eval_fitness(pop[0]) >= 63):
-    #         if(first_tour_gen is None):
-    #             first_tour_gen = i + 1
-    #         tour_counter += 1
-    #
-    # # fig = px.line(pd.DataFrame({'fit': [average_fit, 60], 'gen': [i, 2]}))
-    # fig = px.line(av_fits)
-    # fig.show()
-    #
-    # print()
-    #
-    # pop = [repair(sub) for sub in pop]
-    # summary(pop[0], first_tour_gen, tour_counter, (time.time() - start_time))
-    # print()
-    # eval_fitness(pop[0], True)
-
-    # population_summary(pop, True)
